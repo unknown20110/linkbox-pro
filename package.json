@@ -1,0 +1,12 @@
+{
+  "name": "linkbox-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LinkBox Pro - a private link board with rich previews, topics and Google sync",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  }
+}
