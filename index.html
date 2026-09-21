@@ -69,6 +69,19 @@
   .chip .count { opacity: .6; font-size: .75rem; margin-inline-start: .3rem; }
   .chip-add { border-style: dashed; color: var(--mute); }
 
+  .icon-btn:disabled { opacity: .3; cursor: default; background: transparent; }
+  .btn-danger { background: #dc2626; color: #fff; }
+
+  .dlg { margin: auto; padding: 0; width: min(560px, calc(100vw - 1.5rem)); max-height: min(88vh, 720px);
+         background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .dlg[open] { display: flex; flex-direction: column; }
+  .dlg::backdrop { background: rgba(8, 10, 14, .55); }
+  .trow { display: flex; align-items: center; gap: .25rem; padding: .45rem 1rem; border-bottom: 1px solid var(--line); }
+  .trow .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .trow-del { padding: .9rem 1rem; border-bottom: 1px solid var(--line); background: var(--soft); }
+  .emoji-pick button { font-size: 1.2rem; width: 2.1rem; height: 2.1rem; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
+  .emoji-pick button:hover { background: var(--soft); }
+
   .card, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 
   .thumb { position: relative; aspect-ratio: 16 / 9; background: var(--soft); overflow: hidden; }
@@ -142,6 +155,15 @@
   </main>
 </div>
 
+<dialog id="topicsDlg" class="dlg" aria-labelledby="dlgTitle">
+  <div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid var(--line)">
+    <h2 id="dlgTitle" class="text-lg font-bold">ניהול נושאים</h2>
+    <button type="button" class="icon-btn" data-dlg="close" aria-label="סגור"></button>
+  </div>
+  <ul id="dlgList" class="flex-1 overflow-y-auto"></ul>
+  <form id="topicForm" class="space-y-3 p-4" style="border-top:1px solid var(--line)" autocomplete="off"></form>
+</dialog>
+
 <div id="toast" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4"
      style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));" role="status"></div>
 
@@ -190,13 +212,17 @@ const ICON = {
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z"/></svg>',
   starOn: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5z"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg>',
 };
 
 const el = {
   login: $('#login'), app: $('#app'), grid: $('#grid'), tabs: $('#tabs'), empty: $('#empty'),
   form: $('#addForm'), url: $('#urlInput'), btnAdd: $('#btnAdd'), panel: $('#previewPanel'),
-  search: $('#search'), badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
+  search: $('#search'), dlg: $('#topicsDlg'), dlgList: $('#dlgList'), topicForm: $('#topicForm'), badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
 };
 
 let toastTimer;
@@ -215,38 +241,67 @@ async function safe(fn) {
    ===================================================================== */
 let store = null;          // current data layer (local or cloud)
 let links = [];            // newest first
-let customTopics = [];     // topics the user created
+let savedTopics = null;    // the user's own ordered topic list (null = never customised, use defaults)
+let legacyTopics = [];     // extra topics saved by earlier versions of the app
 let loaded = false;
-let activeTopic = 'all';   // 'all' | 'fav' | <topic name>
+let activeTopic = 'all';   // 'all' | 'fav' | '__none__' | <topic name>
+let graceTopic = null;     // a topic being renamed right now, allowed to stay selected until the new list arrives
 let searchText = '';
 let pending = null;        // link being previewed before save
 let busy = false;
 
+const NONE = '__none__';            // tab key for links without a topic
+const NONE_LABEL = 'ללא נושא';
+
 const allTopics = () => {
+  if (savedTopics) return savedTopics;
   const out = [...DEFAULT_TOPICS];
-  for (const t of [...customTopics, ...links.map((l) => l.topic)]) if (t && !out.includes(t)) out.push(t);
+  for (const t of [...legacyTopics, ...links.map((l) => l.topic)]) if (t && !out.includes(t)) out.push(t);
   return out;
 };
-const defaultTopic = () => (allTopics().includes(activeTopic) ? activeTopic : DEFAULT_TOPICS[0]);
+const isOrphan = (l) => !allTopics().includes(l.topic);   // no topic, or its topic no longer exists
+const defaultTopic = () => (allTopics().includes(activeTopic) ? activeTopic : allTopics()[0] || '');
+const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+// "🎸 גיטרה" <-> { emoji: "🎸", name: "גיטרה" }
+const EMOJI_HEAD = /^((?:\p{Extended_Pictographic}[\uFE0F\u200D]*)+)\s*(.*)$/u;
+function splitTopic(t) { const m = EMOJI_HEAD.exec(t); return m ? { emoji: m[1], name: m[2] } : { emoji: '', name: t }; }
+const joinTopic = (emoji, name) => (emoji ? emoji + ' ' + name : name);
+
+function topicSelectOptions(selected) {
+  const sel = allTopics().includes(selected) ? selected : '';
+  return [...allTopics().map((t) => ({ v: t, l: t })), { v: '', l: NONE_LABEL }]
+    .map((o) => `<option value="${esc(o.v)}"${o.v === sel ? ' selected' : ''}>${esc(o.l)}</option>`).join('');
+}
 
 /* =====================================================================
-   4. Data layers – same interface: start / stop / add / update / remove / addTopic
+   4. Data layers – same interface: start / stop / add / update / remove / applyTopics
    ===================================================================== */
 function makeLocalStore(onLinks, onTopics) {
-  const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch { return []; } };
-  let list = read('linkbox:links');
-  let topics = read('linkbox:topics');
+  const read = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
+  let list = read('linkbox:links', []);
+  const legacy = read('linkbox:topics', []);
+  let saved = read('linkbox:topicList', null);
   const persist = () => {
-    try { localStorage.setItem('linkbox:links', JSON.stringify(list)); localStorage.setItem('linkbox:topics', JSON.stringify(topics)); } catch {}
+    try {
+      localStorage.setItem('linkbox:links', JSON.stringify(list));
+      localStorage.setItem('linkbox:topicList', JSON.stringify(saved));
+    } catch {}
     onLinks([...list].sort((a, b) => b.createdAt - a.createdAt));
   };
   return {
-    start() { persist(); onTopics(topics); },
+    start() { persist(); onTopics({ list: saved, legacy }); },
     stop() {},
     async add(l) { list.push({ ...l, fav: false, id: uid8(), createdAt: Date.now() }); persist(); },
     async update(id, patch) { list = list.map((x) => (x.id === id ? { ...x, ...patch } : x)); persist(); },
     async remove(id) { list = list.filter((x) => x.id !== id); persist(); },
-    async addTopic(t) { if (!topics.includes(t)) { topics.push(t); persist(); onTopics(topics); } },
+    // Saves the topic list; `remap` = { from, to } also moves every link of one topic to another.
+    async applyTopics(newList, remap) {
+      if (remap) list = list.map((x) => (x.topic === remap.from ? { ...x, topic: remap.to } : x));
+      saved = newList;
+      persist();
+      onTopics({ list: saved, legacy });
+    },
   };
 }
 
@@ -254,6 +309,7 @@ function makeCloudStore(fb, uid, onLinks, onTopics) {
   const { db, F } = fb;
   let unsubLinks = () => {};
   let unsubTopics = () => {};
+  let current = [];   // latest links, used to find which ones a topic change affects
   const toList = (snap) =>
     snap.docs
       .map((d) => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() ?? Date.now() }; })
@@ -268,32 +324,51 @@ function makeCloudStore(fb, uid, onLinks, onTopics) {
         console.error(e);
         toast(e.code === 'permission-denied' ? 'אין הרשאה לקרוא נתונים. בדוק את חוקי Firestore (ראה README).' : 'טעינת הקישורים נכשלה.');
       };
-      unsubLinks = F.onSnapshot(ordered, (s) => onLinks(toList(s)), (e) => {
+      unsubLinks = F.onSnapshot(ordered, (s) => onLinks((current = toList(s))), (e) => {
         if (e.code === 'failed-precondition') {
           // Composite index missing – keep working (sorted on the client) and print the index link in the console.
           console.warn('Missing Firestore index (uid + createdAt). Create it with the link below:', e.message);
-          unsubLinks = F.onSnapshot(plain, (s) => onLinks(toList(s)), onErr);
+          unsubLinks = F.onSnapshot(plain, (s) => onLinks((current = toList(s))), onErr);
         } else onErr(e);
       });
-      unsubTopics = F.onSnapshot(F.doc(db, 'users', uid), (s) => onTopics((s.data() || {}).topics || []), (e) => console.warn(e));
+      unsubTopics = F.onSnapshot(F.doc(db, 'users', uid), (s) => {
+        const d = s.data() || {};
+        onTopics({ list: Array.isArray(d.topicList) ? d.topicList : null, legacy: Array.isArray(d.topics) ? d.topics : [] });
+      }, (e) => console.warn(e));
     },
     stop() { unsubLinks(); unsubTopics(); },
     async add(l) { await F.addDoc(F.collection(db, 'links'), { uid, ...l, fav: false, createdAt: F.serverTimestamp() }); },
     async update(id, patch) { await F.updateDoc(F.doc(db, 'links', id), patch); },
     async remove(id) { await F.deleteDoc(F.doc(db, 'links', id)); },
-    async addTopic(t) { await F.setDoc(F.doc(db, 'users', uid), { topics: F.arrayUnion(t) }, { merge: true }); },
+    // Saves the topic list and, if `remap` is given, moves the affected links in the same batch(es).
+    // Firestore allows 500 writes per batch, so big moves are split.
+    async applyTopics(newList, remap) {
+      const ids = remap ? current.filter((l) => l.topic === remap.from).map((l) => l.id) : [];
+      const CHUNK = 400;
+      let i = 0;
+      do {
+        const batch = F.writeBatch(db);
+        if (i === 0) batch.set(F.doc(db, 'users', uid), { topicList: newList }, { merge: true });
+        for (const id of ids.slice(i, i + CHUNK)) batch.update(F.doc(db, 'links', id), { topic: remap.to });
+        await batch.commit();
+        i += CHUNK;
+      } while (i < ids.length);
+    },
   };
 }
 
 function useStore(s) {
   if (store) store.stop();
   store = s;
-  links = []; customTopics = []; loaded = false;
+  links = []; savedTopics = null; legacyTopics = []; loaded = false;
   render();
   if (s) s.start();
 }
-const onLinks = (list) => { links = list; loaded = true; render(); };
-const onTopics = (list) => { customTopics = list; renderTabs(); };
+const onLinks = (list) => { links = list; loaded = true; render(); renderManagerList(); };
+const onTopics = ({ list, legacy }) => {
+  savedTopics = list; legacyTopics = legacy || [];
+  render(); renderManagerList(); refreshPreviewTopics();
+};
 
 /* =====================================================================
    5. Rendering
@@ -303,20 +378,23 @@ function render() { renderTabs(); renderGrid(); }
 function renderTabs() {
   const counts = {};
   links.forEach((l) => (counts[l.topic] = (counts[l.topic] || 0) + 1));
+  const orphans = links.filter(isOrphan).length;
+  // the selected topic may have just been renamed/deleted (here or on another device)
+  if (activeTopic === NONE ? !orphans : !['all', 'fav'].includes(activeTopic) && !allTopics().includes(activeTopic) && activeTopic !== graceTopic) activeTopic = 'all';
   const tabs = [
     { k: 'all', label: 'הכל', n: links.length },
     { k: 'fav', label: '★ מועדפים', n: links.filter((l) => l.fav).length },
     ...allTopics().map((t) => ({ k: t, label: t, n: counts[t] || 0 })),
+    ...(orphans ? [{ k: NONE, label: NONE_LABEL, n: orphans }] : []),
   ];
   el.tabs.innerHTML =
     tabs.map((t) => `<button class="chip" data-tab="${esc(t.k)}" aria-pressed="${t.k === activeTopic}">${esc(t.label)}<span class="count">${t.n}</span></button>`).join('') +
-    `<button class="chip chip-add" data-act="addTopic">+ נושא</button>`;
+    `<button class="chip chip-add" data-act="manageTopics">ניהול נושאים</button>`;
 }
 
 function cardHTML(l) {
   const p = platformOf(l.url);
   const img = safeUrl(l.image).replace(/^http:/i, 'https:');
-  const topicOptions = allTopics().map((t) => `<option value="${esc(t)}"${t === l.topic ? ' selected' : ''}>${esc(t)}</option>`).join('');
   return `
 <article class="card flex flex-col" data-id="${esc(l.id)}">
   <a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener noreferrer" class="block flex-1">
@@ -331,7 +409,7 @@ function cardHTML(l) {
     </div>
   </a>
   <div class="flex items-center gap-1 px-3 py-3">
-    <select class="field field-sm" data-act="topic" aria-label="נושא">${topicOptions}</select>
+    <select class="field field-sm" data-act="topic" aria-label="נושא">${topicSelectOptions(l.topic)}</select>
     <span class="flex-1"></span>
     <button class="icon-btn" data-act="fav" aria-pressed="${!!l.fav}" aria-label="${l.fav ? 'הסר ממועדפים' : 'הוסף למועדפים'}">${l.fav ? ICON.starOn : ICON.star}</button>
     <button class="icon-btn" data-act="del" aria-label="מחק קישור">${ICON.trash}</button>
@@ -349,7 +427,8 @@ function renderGrid() {
   const q = searchText.trim().toLowerCase();
   const shown = links.filter((l) => {
     if (activeTopic === 'fav' && !l.fav) return false;
-    if (activeTopic !== 'all' && activeTopic !== 'fav' && l.topic !== activeTopic) return false;
+    if (activeTopic === NONE) { if (!isOrphan(l)) return false; }
+    else if (activeTopic !== 'all' && activeTopic !== 'fav' && l.topic !== activeTopic) return false;
     return !q || [l.title, l.description, l.url, l.topic].some((v) => (v || '').toLowerCase().includes(q));
   });
   el.grid.innerHTML = shown.map(cardHTML).join('');
@@ -375,7 +454,6 @@ function renderPreview() {
 
   const p = platformOf(pending.url);
   const img = safeUrl(pending.image).replace(/^http:/i, 'https:');
-  const options = allTopics().map((t) => `<option value="${esc(t)}"${t === pending.topic ? ' selected' : ''}>${esc(t)}</option>`).join('');
   el.panel.innerHTML = `
     <div class="panel sm:flex">
       <div class="thumb sm:w-72 sm:flex-none" style="border-radius:0">
@@ -388,7 +466,7 @@ function renderPreview() {
         <textarea id="pvDesc" class="field text-sm" dir="auto" rows="2" aria-label="תיאור">${esc(pending.description)}</textarea>
         ${pending.weak ? '<p class="mute text-sm">לא הצלחנו למשוך תצוגה מלאה מהאתר. אפשר לשמור עם כותרת שתכתוב בעצמך.</p>' : ''}
         <div class="flex flex-wrap items-center gap-2">
-          <select id="pvTopic" class="field field-sm" aria-label="נושא">${options}</select>
+          <select id="pvTopic" class="field field-sm" aria-label="נושא">${topicSelectOptions(pending.topic)}</select>
           <span class="flex-1"></span>
           <button type="button" class="btn btn-ghost" data-act="cancel">ביטול</button>
           <button type="button" class="btn btn-primary" data-act="save">שמור</button>
@@ -485,14 +563,154 @@ el.grid.addEventListener('change', (e) => {
 el.tabs.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.act === 'addTopic') {
-    const name = (prompt('שם הנושא החדש (אפשר להתחיל באימוג׳י)') || '').trim().slice(0, 40);
-    if (!name) return;
-    if (allTopics().includes(name)) { activeTopic = name; return render(); }
-    safe(async () => { await store.addTopic(name); activeTopic = name; render(); });
+  if (b.dataset.act === 'manageTopics') return openManager();
+  if (b.dataset.tab !== undefined) { activeTopic = b.dataset.tab; render(); }
+});
+
+/* =====================================================================
+   7b. Topic manager (add / rename / reorder / delete)
+   ===================================================================== */
+let mgr = { editing: null, deleting: null };   // topic being edited / being deleted
+const QUICK_EMOJI = ['🎸', '🎵', '🎙️', '🎧', '💡', '🔥', '🎬', '📚', '🎨', '🍳', '💪', '✈️', '🏠', '💼', '🎮', '🧠', '⭐', '📌'];
+
+function openManager() {
+  mgr = { editing: null, deleting: null };
+  el.dlg.querySelector('[data-dlg="close"]').innerHTML = ICON.close;
+  el.dlg.showModal();            // must be open before the list renders (renderManagerList skips a closed dialog)
+  renderManagerList(); renderManagerForm();
+}
+
+function renderManagerList() {
+  if (!el.dlg.open) return;
+  const topics = allTopics();
+  const counts = {};
+  links.forEach((l) => (counts[l.topic] = (counts[l.topic] || 0) + 1));
+  if (!topics.length) {
+    el.dlgList.innerHTML = '<li class="mute p-6 text-center text-sm">אין נושאים עדיין. הוסף את הראשון למטה.</li>';
     return;
   }
-  if (b.dataset.tab !== undefined) { activeTopic = b.dataset.tab; render(); }
+  el.dlgList.innerHTML = topics.map((t, i) => {
+    const n = counts[t] || 0;
+    if (mgr.deleting === t) {
+      const targets = topics.filter((x) => x !== t)
+        .map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+      return `<li class="trow-del" data-topic="${esc(t)}">
+        <p class="font-medium">למחוק את ״${esc(t)}״?</p>
+        ${n ? `<label class="mt-2 block text-sm"><span class="mute">${n === 1 ? 'הקישור שבו יועבר אל' : `${n} הקישורים שבו יועברו אל`}</span>
+          <select id="delTarget" class="field mt-1"><option value="">${NONE_LABEL}</option>${targets}</select></label>`
+          : '<p class="mute mt-1 text-sm">אין בו קישורים.</p>'}
+        <div class="mt-3 flex justify-end gap-2">
+          <button type="button" class="btn btn-ghost" data-tact="cancel-del">ביטול</button>
+          <button type="button" class="btn btn-danger" data-tact="confirm-del">מחק נושא</button>
+        </div>
+      </li>`;
+    }
+    return `<li class="trow" data-topic="${esc(t)}"${mgr.editing === t ? ' style="background:var(--soft)"' : ''}>
+      <span class="name" dir="auto">${esc(t)}</span>
+      <span class="mute ms-1 me-2 text-xs">${n}</span>
+      <button type="button" class="icon-btn" data-tact="up" aria-label="הזז למעלה"${i === 0 ? ' disabled' : ''}>${ICON.up}</button>
+      <button type="button" class="icon-btn" data-tact="down" aria-label="הזז למטה"${i === topics.length - 1 ? ' disabled' : ''}>${ICON.down}</button>
+      <button type="button" class="icon-btn" data-tact="edit" aria-label="ערוך נושא">${ICON.edit}</button>
+      <button type="button" class="icon-btn" data-tact="del" aria-label="מחק נושא">${ICON.trash}</button>
+    </li>`;
+  }).join('');
+}
+
+function renderManagerForm() {
+  const cur = mgr.editing !== null ? splitTopic(mgr.editing) : { emoji: '', name: '' };
+  el.topicForm.innerHTML = `
+    <p class="text-sm font-semibold">${mgr.editing !== null ? 'עריכת נושא' : 'נושא חדש'}</p>
+    <div class="flex gap-2">
+      <input id="tfEmoji" class="field text-center text-xl" style="width:4.5rem" maxlength="8" placeholder="🙂" aria-label="אימוג׳י" value="${esc(cur.emoji)}">
+      <input id="tfName" class="field flex-1" maxlength="30" placeholder="שם הנושא" aria-label="שם הנושא" value="${esc(cur.name)}">
+    </div>
+    <div class="emoji-pick flex flex-wrap gap-0.5" aria-label="אימוג׳י נפוצים">
+      ${QUICK_EMOJI.map((e) => `<button type="button" data-emoji="${esc(e)}" aria-label="${esc(e)}">${esc(e)}</button>`).join('')}
+    </div>
+    <div class="flex justify-end gap-2">
+      ${mgr.editing !== null ? '<button type="button" class="btn btn-ghost" data-tact="cancel-edit">ביטול</button>' : ''}
+      <button type="submit" class="btn btn-primary">${mgr.editing !== null ? 'שמור שינוי' : 'הוסף נושא'}</button>
+    </div>`;
+}
+
+// keeps an open preview's topic list in sync when topics change, without touching what was typed
+function refreshPreviewTopics() {
+  const sel = $('#pvTopic');
+  if (!sel || !pending || pending.loading) return;
+  pending.topic = allTopics().includes(sel.value) ? sel.value : '';
+  sel.innerHTML = topicSelectOptions(pending.topic);
+}
+
+el.topicForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('#tfName').value.trim();
+  if (!name) return toast('כתוב שם לנושא.');
+  const full = joinTopic($('#tfEmoji').value.trim(), name);
+  const topics = allTopics();
+  const old = mgr.editing;
+
+  if (old === null) {
+    if (topics.some((t) => sameName(t, full))) return toast('נושא בשם הזה כבר קיים.');
+    safe(async () => {
+      await store.applyTopics([...topics, full]);
+      mgr.editing = null; renderManagerForm();
+      $('#tfName').focus();
+      toast('הנושא נוסף.');
+    });
+  } else {
+    if (full === old) { mgr.editing = null; renderManagerForm(); return renderManagerList(); }
+    if (topics.some((t) => t !== old && sameName(t, full))) {
+      return toast('נושא בשם הזה כבר קיים. כדי למזג נושאים, מחק אחד מהם והעבר את הקישורים לשני.');
+    }
+    safe(async () => {
+      if (activeTopic === old) { activeTopic = full; graceTopic = full; }   // keep the same tab selected through the rename
+      try { await store.applyTopics(topics.map((t) => (t === old ? full : t)), { from: old, to: full }); }
+      finally { graceTopic = null; render(); }
+      mgr.editing = null; renderManagerForm(); renderManagerList();
+      toast('הנושא עודכן.');
+    });
+  }
+});
+
+el.topicForm.addEventListener('click', (e) => {
+  const em = e.target.closest('[data-emoji]');
+  if (em) { $('#tfEmoji').value = em.dataset.emoji; return $('#tfName').focus(); }
+  if (e.target.closest('[data-tact="cancel-edit"]')) { mgr.editing = null; renderManagerForm(); renderManagerList(); }
+});
+
+el.dlgList.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tact]');
+  const row = e.target.closest('[data-topic]');
+  if (!b || !row) return;
+  const t = row.dataset.topic;
+  const topics = allTopics();
+  const act = b.dataset.tact;
+
+  if (act === 'up' || act === 'down') {
+    const i = topics.indexOf(t), j = act === 'up' ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= topics.length) return;
+    const next = [...topics];
+    [next[i], next[j]] = [next[j], next[i]];
+    return safe(() => store.applyTopics(next));
+  }
+  if (act === 'edit') { mgr = { editing: t, deleting: null }; renderManagerList(); renderManagerForm(); return $('#tfName').focus(); }
+  if (act === 'del') { mgr = { editing: null, deleting: t }; renderManagerList(); renderManagerForm(); return; }
+  if (act === 'cancel-del') { mgr.deleting = null; return renderManagerList(); }
+  if (act === 'confirm-del') {
+    const target = ($('#delTarget') || {}).value || '';
+    const hasLinks = links.some((l) => l.topic === t);
+    safe(async () => {
+      await store.applyTopics(topics.filter((x) => x !== t), hasLinks ? { from: t, to: target } : null);
+      if (activeTopic === t) activeTopic = 'all';
+      mgr.deleting = null; renderManagerList();
+      toast('הנושא נמחק.');
+    });
+  }
+});
+
+el.dlg.addEventListener('click', (e) => {
+  // the ✕ button, or a click on the dimmed backdrop (the click lands on the <dialog> itself)
+  if (e.target === el.dlg || e.target.closest('[data-dlg="close"]')) el.dlg.close();
 });
 
 el.search.addEventListener('input', () => { searchText = el.search.value; renderGrid(); });
