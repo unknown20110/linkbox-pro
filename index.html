@@ -225,6 +225,36 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? u : '');
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+
+// Share links carry tracking params that make the same post look like a "new" link every time
+// (Instagram's igsh, TikTok's _r/_t, a YouTube si= id, utm_* on almost anything...). This builds a
+// canonical key for COMPARISON only — the link people actually save keeps its real, original URL.
+const DEDUPE_STRIP_UNIVERSAL = new Set(['fbclid', 'gclid', 'gclsrc', 'dclid', 'msclkid', 'yclid', 'mc_cid', 'mc_eid', 'ref', 'ref_src', 'spm', 'igshid', 'igsh']);
+const DEDUPE_STRIP_BY_HOST = {
+  'instagram.com': ['igsh', 'igshid', 'img_index'],
+  'tiktok.com': ['_r', '_t', 'is_from_webapp', 'sender_device', 'sender_web_id', 'web_id', 'checksum'],
+  'youtube.com': ['si', 'feature', 'app', 't'],
+  'youtu.be': ['si', 'feature', 'app', 't'],
+  'twitter.com': ['s', 't'],
+  'x.com': ['s', 't'],
+  'facebook.com': ['mibextid', 'rdid', 'wtsid'],
+  'fb.watch': ['mibextid'],
+};
+function normalizeForDedupe(urlStr) {
+  let u;
+  try { u = new URL(urlStr); } catch { return String(urlStr || '').trim().toLowerCase(); }
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  const strip = new Set(DEDUPE_STRIP_UNIVERSAL);
+  for (const [h, params] of Object.entries(DEDUPE_STRIP_BY_HOST)) {
+    if (host === h || host.endsWith('.' + h)) params.forEach((p) => strip.add(p));
+  }
+  const kept = [...u.searchParams.entries()]
+    .filter(([k]) => !strip.has(k) && !k.toLowerCase().startsWith('utm_'))
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const qs = kept.map(([k, v]) => `${k}=${v}`).join('&');
+  const path = u.pathname.replace(/\/+$/, '') || '/';
+  return `${host}${path}${qs ? '?' + qs : ''}`.toLowerCase();
+}
 const uid8 = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 const DEFAULT_TOPICS = ['🎸 גיטרה', '🎵 שירים ללמוד', '🎙️ ציוד', '💡 רעיונות', '🔥 השראה'];
@@ -703,7 +733,8 @@ el.form.addEventListener('submit', async (e) => {
     url = u.href;
   } catch { return toast('הקישור לא נראה תקין. בדוק ונסה שוב.'); }
 
-  if (links.some((l) => l.url === url)) return toast('הקישור הזה כבר שמור אצלך.');
+  const dup = links.find((l) => normalizeForDedupe(l.url) === normalizeForDedupe(url));
+  if (dup) return toast(dup.topic ? `הקישור הזה כבר שמור אצלך בנושא "${dup.topic}".` : 'הקישור הזה כבר שמור אצלך.');
 
   busy = true; el.btnAdd.disabled = true;
   pending = { loading: true, url };
