@@ -1237,8 +1237,8 @@ function buildBackupData() {
     links: links.map(({ id, fav, ...rest }) => rest),   // fav is intentionally not restored – see the settings dialog note
   };
 }
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(buildBackupData(), null, 2)], { type: 'application/json' });
+function exportBackup(data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `linkbox-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1293,12 +1293,19 @@ el.btnSettings.addEventListener('click', () => el.settingsDlg.showModal());
 el.settingsDlg.addEventListener('click', (e) => {
   if (e.target === el.settingsDlg || e.target.closest('[data-dlg="close-settings"]')) el.settingsDlg.close();
 });
-el.btnExport.addEventListener('click', () => safe(async () => exportBackup()));
+el.btnExport.addEventListener('click', () => safe(async () => {
+  const data = buildBackupData();
+  exportBackup(data);
+  el.settingsDlg.close();   // a native <dialog> sits above position:fixed content, so the toast below would be hidden behind it otherwise
+  toast(`הגיבוי הורד (${data.links.length} קישורים).`);
+}));
 el.btnImport.addEventListener('click', () => el.importFile.click());
 el.importFile.addEventListener('change', () => {
   const file = el.importFile.files[0];
   el.importFile.value = '';
-  if (file) safe(() => importBackup(file));
+  if (!file) return;
+  el.settingsDlg.close();
+  safe(() => importBackup(file));
 });
 
 /* Theme */
