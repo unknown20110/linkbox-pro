@@ -351,6 +351,9 @@ const el = {
   settingsDlg: $('#settingsDlg'), btnSettings: $('#btnSettings'), btnExport: $('#btnExport'), btnImport: $('#btnImport'), importFile: $('#importFile'),
   badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
 };
+el.btnSelect.innerHTML = ICON.selectMode;
+el.btnSettings.innerHTML = ICON.settings;
+el.settingsDlg.querySelector('[data-dlg="close-settings"]').innerHTML = ICON.close;
 
 let toastTimer;
 function toast(msg, action) {
