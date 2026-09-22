@@ -115,6 +115,10 @@
   .tagchip:hover { background: var(--line); color: var(--ink); }
 
   .card, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .card { position: relative; }
+  .select-box { position: absolute; top: .5rem; inset-inline-end: .5rem; z-index: 5; width: 1.7rem; height: 1.7rem; border-radius: 7px;
+                background: rgba(15, 17, 21, .55); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .select-box input { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); cursor: pointer; }
 
   .thumb { position: relative; aspect-ratio: 16 / 9; background: var(--soft); overflow: hidden; }
   .thumb img, .thumb .ph { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -162,6 +166,7 @@
       <span id="modeBadge" class="hidden rounded-full px-2.5 py-0.5 text-xs font-medium" style="background: var(--soft); color: var(--mute);"
             title="Firebase לא מוגדר, הקישורים נשמרים רק בדפדפן הזה">מצב מקומי</span>
       <div class="flex-1"></div>
+      <button id="btnSettings" class="icon-btn" aria-label="הגדרות וגיבוי"></button>
       <button id="btnTheme" class="icon-btn" aria-label="החלף מצב כהה/בהיר"></button>
       <button id="btnUser" class="hidden h-9 w-9 overflow-hidden rounded-full" style="border:1px solid var(--line)" aria-label="התנתק"></button>
     </div>
@@ -182,6 +187,7 @@
         <input id="search" class="field flex-1" type="search" placeholder="חפש בכותרות, בתיאורים ובכתובות" aria-label="חיפוש">
         <button type="button" id="viewGrid" class="icon-btn" data-view="grid" aria-label="תצוגת רשת"></button>
         <button type="button" id="viewList" class="icon-btn" data-view="list" aria-label="תצוגת רשימה"></button>
+        <button type="button" id="btnSelect" class="icon-btn" aria-pressed="false" aria-label="בחירה מרובה"></button>
       </div>
       <nav id="tabs" class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1" aria-label="נושאים"></nav>
       <div id="filterBar" class="space-y-2"></div>
@@ -216,6 +222,31 @@
   <ul id="dlgList" class="flex-1 overflow-y-auto"></ul>
   <form id="topicForm" class="space-y-3 p-4" style="border-top:1px solid var(--line)" autocomplete="off"></form>
 </dialog>
+
+<dialog id="settingsDlg" class="dlg" aria-labelledby="settingsTitle">
+  <div class="flex items-center justify-between px-4 py-3" style="border-bottom:1px solid var(--line)">
+    <h2 id="settingsTitle" class="text-lg font-bold">הגדרות וגיבוי</h2>
+    <button type="button" class="icon-btn" data-dlg="close-settings" aria-label="סגור"></button>
+  </div>
+  <div class="space-y-3 p-4">
+    <button type="button" id="btnExport" class="btn btn-ghost w-full justify-start">ייצוא גיבוי (JSON)</button>
+    <button type="button" id="btnImport" class="btn btn-ghost w-full justify-start">ייבוא מגיבוי (JSON)</button>
+    <input type="file" id="importFile" accept="application/json,.json" class="hidden" aria-label="בחר קובץ גיבוי">
+    <p class="mute text-xs">הגיבוי כולל את כל הקישורים, הנושאים, התגיות וההערות האישיות. מועדפים לא נכללים בגיבוי.</p>
+  </div>
+</dialog>
+
+<div id="bulkBar" class="hidden fixed inset-x-0 bottom-0 z-40 px-4" style="padding-bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));">
+  <div class="mx-auto max-w-5xl">
+    <div class="panel flex flex-wrap items-center gap-2 p-3">
+      <span id="bulkCount" class="text-sm font-medium"></span>
+      <span class="flex-1"></span>
+      <select id="bulkTopic" class="field field-sm" aria-label="העבר לנושא"></select>
+      <button type="button" id="bulkDelete" class="btn btn-danger btn-sm">מחק</button>
+      <button type="button" id="bulkCancel" class="btn btn-ghost btn-sm">בטל בחירה</button>
+    </div>
+  </div>
+</div>
 
 <div id="toast" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4"
      style="padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));" role="status"></div>
@@ -306,23 +337,29 @@ const ICON = {
   checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.3l2.5 2.5 5-5.2"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>',
+  selectMode: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M8 12.3l2.6 2.6L16.2 9"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a8 8 0 000-2l2-1.5-2-3.4-2.4.6a8 8 0 00-1.7-1L14.8 3h-3.6l-.5 2.7a8 8 0 00-1.7 1l-2.4-.6-2 3.4L6.6 11a8 8 0 000 2l-2 1.5 2 3.4 2.4-.6a8 8 0 001.7 1l.5 2.7h3.6l.5-2.7a8 8 0 001.7-1l2.4.6 2-3.4-2-1.5z"/></svg>',
 };
 
 const el = {
   login: $('#login'), app: $('#app'), grid: $('#grid'), tabs: $('#tabs'), empty: $('#empty'),
   form: $('#addForm'), url: $('#urlInput'), btnAdd: $('#btnAdd'), panel: $('#previewPanel'),
   search: $('#search'), filterBar: $('#filterBar'), scrollGroup: $('#scrollGroup'),
-  viewGrid: $('#viewGrid'), viewList: $('#viewList'),
+  viewGrid: $('#viewGrid'), viewList: $('#viewList'), btnSelect: $('#btnSelect'),
+  bulkBar: $('#bulkBar'), bulkCount: $('#bulkCount'), bulkTopic: $('#bulkTopic'), bulkDelete: $('#bulkDelete'), bulkCancel: $('#bulkCancel'),
   dlg: $('#topicsDlg'), dlgList: $('#dlgList'), topicForm: $('#topicForm'),
+  settingsDlg: $('#settingsDlg'), btnSettings: $('#btnSettings'), btnExport: $('#btnExport'), btnImport: $('#btnImport'), importFile: $('#importFile'),
   badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
 };
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, action) {
   if (!msg) return;
-  el.toast.innerHTML = `<div class="rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg" style="background:var(--ink);color:var(--bg)">${esc(msg)}</div>`;
+  const btn = action ? `<button type="button" id="toastAction" style="color:var(--bg);font-weight:700;text-decoration:underline;background:none;border:none;padding:0;margin-inline-start:.85rem;cursor:pointer;font:inherit">${esc(action.label)}</button>` : '';
+  el.toast.innerHTML = `<div class="rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg flex items-center" style="background:var(--ink);color:var(--bg)">${esc(msg)}${btn}</div>`;
+  if (action) $('#toastAction').addEventListener('click', () => { clearTimeout(toastTimer); el.toast.innerHTML = ''; action.onClick(); });
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.toast.innerHTML = ''), 3800);
+  toastTimer = setTimeout(() => (el.toast.innerHTML = ''), action ? 6500 : 3800);
 }
 async function safe(fn) {
   try { await fn(); } catch (e) { console.error(e); toast('משהו השתבש. נסה שוב.'); }
@@ -351,6 +388,10 @@ let sortMode = 'new';      // 'new' | 'old' | 'az'
 let viewMode = 'grid';     // 'grid' | 'list' – a device preference, kept in localStorage regardless of account type
 try { viewMode = localStorage.getItem('linkbox:view') === 'list' ? 'list' : 'grid'; } catch {}
 let editingId = null;      // id of the card whose note/tags are being edited inline
+
+// multi-select (bulk move/delete)
+let selectMode = false;
+let selectedIds = new Set();
 
 // sharing (cloud accounts only)
 let activeShares = [];         // [{ topic, shareId }] – this user's currently-shared topics
@@ -633,8 +674,10 @@ function detailsHTML(l) {
 function cardHTML(l) {
   const p = platformOf(l.url);
   const img = safeUrl(l.image).replace(/^http:/i, 'https:');
+  const checked = selectedIds.has(l.id);
   return `
 <article class="card flex flex-col${l.done ? ' opacity-60' : ''}" data-id="${esc(l.id)}">
+  ${selectMode ? `<label class="select-box"><input type="checkbox" data-select ${checked ? 'checked' : ''} aria-label="בחר קישור"></label>` : ''}
   <a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener noreferrer" class="block">
     <div class="thumb">
       <div class="ph" style="--c:${p.color}">${esc(p.name.charAt(0))}</div>
@@ -647,14 +690,14 @@ function cardHTML(l) {
     </div>
   </a>
   ${detailsHTML(l)}
-  <div class="mt-auto flex items-center gap-1 px-3 py-3">
+  ${selectMode ? '' : `<div class="mt-auto flex items-center gap-1 px-3 py-3">
     <select class="field field-sm" data-act="topic" aria-label="נושא">${topicSelectOptions(l.topic)}</select>
     <span class="flex-1"></span>
     <button class="icon-btn" data-act="edit" aria-label="ערוך הערה ותגיות">${ICON.edit}</button>
     <button class="icon-btn" data-act="done" aria-pressed="${!!l.done}" aria-label="${l.done ? 'סמן כלא בוצע' : 'סמן כבוצע'}">${ICON.checkCircle}</button>
     <button class="icon-btn" data-act="fav" aria-pressed="${!!l.fav}" aria-label="${l.fav ? 'הסר ממועדפים' : 'הוסף למועדפים'}">${l.fav ? ICON.starOn : ICON.star}</button>
     <button class="icon-btn" data-act="del" aria-label="מחק קישור">${ICON.trash}</button>
-  </div>
+  </div>`}
 </article>`;
 }
 
@@ -812,7 +855,18 @@ function saveCardDetails(id) {
   });
 }
 
+function toggleSelect(id) {
+  selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+  renderGrid();
+  paintBulkBar();
+}
+
 el.grid.addEventListener('click', (e) => {
+  if (selectMode) {
+    const card = e.target.closest('article[data-id]');
+    if (card && e.target.closest('a')) { e.preventDefault(); toggleSelect(card.dataset.id); }
+    return;   // no per-card actions (fav/done/edit/delete/topic) while selecting – exit select mode to use them
+  }
   const tagChip = e.target.closest('[data-tagclick]');
   if (tagChip) {
     const t = tagChip.dataset.tagclick;
@@ -836,6 +890,8 @@ el.grid.addEventListener('click', (e) => {
   if (b.dataset.act === 'detailsCancel') { editingId = null; renderGrid(); }
 });
 el.grid.addEventListener('change', (e) => {
+  const cb = e.target.closest('[data-select]');
+  if (cb) return toggleSelect(cb.closest('[data-id]').dataset.id);
   const s = e.target.closest('select[data-act="topic"]');
   if (s) safe(() => store.update(s.closest('[data-id]').dataset.id, { topic: s.value }));
 });
@@ -1110,6 +1166,137 @@ el.scrollGroup.addEventListener('wheel', (e) => {
   row.scrollLeft += e.deltaY;
   e.preventDefault();
 }, { passive: false });
+
+/* =====================================================================
+   7d. Multi-select: bulk move / bulk delete with undo
+   ===================================================================== */
+function paintBulkBar() {
+  el.bulkBar.classList.toggle('hidden', !selectMode);
+  if (!selectMode) return;
+  el.bulkCount.textContent = selectedIds.size ? `${selectedIds.size} נבחרו` : 'בחר קישורים לפעולה';
+  el.bulkTopic.innerHTML = `<option value="" selected disabled>העבר לנושא…</option>`
+    + allTopics().map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')
+    + `<option value="${NONE}">${NONE_LABEL}</option>`;
+  const has = selectedIds.size > 0;
+  el.bulkDelete.disabled = !has; el.bulkDelete.style.opacity = has ? '' : '.5';
+  el.bulkTopic.disabled = !has; el.bulkTopic.style.opacity = has ? '' : '.5';
+}
+function setSelectMode(on) {
+  selectMode = on;
+  if (!on) selectedIds = new Set();
+  else editingId = null;   // close any open note/tags editor first, so it isn't stranded with no Save/Cancel row
+  el.btnSelect.setAttribute('aria-pressed', String(on));
+  renderGrid(); paintBulkBar();
+}
+el.btnSelect.addEventListener('click', () => setSelectMode(!selectMode));
+el.bulkCancel.addEventListener('click', () => setSelectMode(false));
+
+el.bulkTopic.addEventListener('change', () => {
+  const v = el.bulkTopic.value;
+  if (!v || !selectedIds.size) return;
+  const topic = v === NONE ? '' : v;
+  const ids = [...selectedIds];
+  safe(async () => {
+    await Promise.all(ids.map((id) => store.update(id, { topic })));
+    toast(`${ids.length} קישורים הועברו ל${topic ? `נושא "${topic}"` : NONE_LABEL}.`);
+    setSelectMode(false);
+  });
+});
+
+el.bulkDelete.addEventListener('click', () => {
+  if (!selectedIds.size) return;
+  const ids = [...selectedIds];
+  const removed = links.filter((l) => ids.includes(l.id));   // snapshot the full link data, for undo
+  setSelectMode(false);
+  safe(async () => {
+    await Promise.all(ids.map((id) => store.remove(id)));
+    toast(`${removed.length} קישורים נמחקו.`, {
+      label: 'בטל',
+      onClick: () => safe(async () => {
+        // undo = re-add the same data; it lands as new entries (fresh ids/order), which is normal for this kind of undo
+        for (const l of removed) {
+          const { id, createdAt, fav, ...rest } = l;
+          await store.add(rest);
+        }
+        toast('השחזור בוצע.');
+      }),
+    });
+  });
+});
+
+/* =====================================================================
+   7e. Backup: export everything to a JSON file, import it back
+   ===================================================================== */
+function buildBackupData() {
+  return {
+    app: 'LinkBox Pro', version: 1, exportedAt: new Date().toISOString(),
+    topics: allTopics(),
+    links: links.map(({ id, fav, ...rest }) => rest),   // fav is intentionally not restored – see the settings dialog note
+  };
+}
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(buildBackupData(), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `linkbox-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+function backupLinkToAdd(raw) {
+  if (!raw || typeof raw.url !== 'string' || !safeUrl(raw.url)) return null;
+  return {
+    url: raw.url,
+    title: typeof raw.title === 'string' ? raw.title.slice(0, 300) : hostOf(raw.url),
+    description: typeof raw.description === 'string' ? raw.description.slice(0, 500) : '',
+    image: safeUrl(raw.image) || '',
+    topic: typeof raw.topic === 'string' ? raw.topic : '',
+    tags: Array.isArray(raw.tags) ? parseTags(raw.tags.join(',')) : [],
+    note: typeof raw.note === 'string' ? raw.note.trim().slice(0, 200) : '',
+    done: !!raw.done,
+  };
+}
+async function importBackup(file) {
+  let data;
+  try { data = JSON.parse(await readFileAsText(file)); }
+  catch { return toast('הקובץ לא תקין (לא JSON).'); }
+  const items = Array.isArray(data?.links) ? data.links : Array.isArray(data) ? data : null;
+  if (!items) return toast('הקובץ לא בפורמט של גיבוי LinkBox Pro.');
+
+  const newTopics = Array.isArray(data.topics) ? data.topics.filter((t) => typeof t === 'string' && !allTopics().includes(t)) : [];
+  if (newTopics.length) await store.applyTopics([...allTopics(), ...newTopics]);
+  const topicsNow = newTopics.length ? [...allTopics(), ...newTopics] : allTopics();
+
+  let added = 0, skipped = 0;
+  for (const raw of items) {
+    const link = backupLinkToAdd(raw);
+    if (!link) { skipped++; continue; }
+    if (!topicsNow.includes(link.topic)) link.topic = '';
+    if (links.some((l) => normalizeForDedupe(l.url) === normalizeForDedupe(link.url))) { skipped++; continue; }
+    await store.add(link);
+    added++;
+  }
+  toast(`יובאו ${added} קישורים${skipped ? `, ${skipped} דולגו (כבר קיימים או לא תקינים)` : ''}.`);
+}
+
+el.btnSettings.addEventListener('click', () => el.settingsDlg.showModal());
+el.settingsDlg.addEventListener('click', (e) => {
+  if (e.target === el.settingsDlg || e.target.closest('[data-dlg="close-settings"]')) el.settingsDlg.close();
+});
+el.btnExport.addEventListener('click', () => safe(async () => exportBackup()));
+el.btnImport.addEventListener('click', () => el.importFile.click());
+el.importFile.addEventListener('change', () => {
+  const file = el.importFile.files[0];
+  el.importFile.value = '';
+  if (file) safe(() => importBackup(file));
+});
 
 /* Theme */
 function paintTheme() {
