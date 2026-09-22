@@ -6,6 +6,17 @@
 <meta name="theme-color" content="#0f1115">
 <title>LinkBox Pro</title>
 
+<!-- Install as an app (Android/desktop): manifest + icons + share-target so links can be shared straight into LinkBox -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LinkBox">
+<script>
+  if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -472,7 +483,14 @@ function useStore(s) {
   render();
   if (s) s.start();
 }
-const onLinks = (list) => { links = list; loaded = true; render(); renderManagerList(); scheduleShareSync(); };
+const onLinks = (list) => {
+  links = list; loaded = true; render(); renderManagerList(); scheduleShareSync();
+  if (pendingShareTarget) {
+    const url = pendingShareTarget; pendingShareTarget = null;
+    el.url.value = url;
+    el.form.requestSubmit ? el.form.requestSubmit() : el.form.dispatchEvent(new Event('submit', { cancelable: true }));
+  }
+};
 const onTopics = ({ list, legacy, shares }) => {
   savedTopics = list; legacyTopics = legacy || []; activeShares = Array.isArray(shares) ? shares : [];
   render(); renderManagerList(); refreshPreviewTopics(); scheduleShareSync();
@@ -1078,6 +1096,19 @@ async function bootShare(id) {
    8. Boot: Firebase (Google sign-in + Firestore) or local mode
    ===================================================================== */
 const shareId = new URLSearchParams(location.search).get('share');
+
+// Arriving from Android's share sheet (installed PWA) or the iOS Shortcut: ?url=/?text=/?title= carries the shared link.
+// Captured once, consumed the first time the board finishes loading (see onLinks), then the URL is cleaned up.
+let pendingShareTarget = null;
+if (!shareId) {
+  const qp = new URLSearchParams(location.search);
+  if (qp.has('url') || qp.has('text') || qp.has('title')) {
+    const m = (qp.get('url') || qp.get('text') || qp.get('title') || '').match(/https?:\/\/[^\s]+/i);
+    if (m) pendingShareTarget = m[0];
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+}
+
 if (shareId) { bootShare(shareId); } else {
 
 function show(name) {
