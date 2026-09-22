@@ -240,6 +240,7 @@
   <div class="mx-auto max-w-5xl">
     <div class="panel flex flex-wrap items-center gap-2 p-3">
       <span id="bulkCount" class="text-sm font-medium"></span>
+      <button type="button" id="bulkSelectAll" class="btn btn-ghost btn-sm">בחר הכל</button>
       <span class="flex-1"></span>
       <select id="bulkTopic" class="field field-sm" aria-label="העבר לנושא"></select>
       <button type="button" id="bulkDelete" class="btn btn-danger btn-sm">מחק</button>
@@ -346,7 +347,7 @@ const el = {
   form: $('#addForm'), url: $('#urlInput'), btnAdd: $('#btnAdd'), panel: $('#previewPanel'),
   search: $('#search'), filterBar: $('#filterBar'), scrollGroup: $('#scrollGroup'),
   viewGrid: $('#viewGrid'), viewList: $('#viewList'), btnSelect: $('#btnSelect'),
-  bulkBar: $('#bulkBar'), bulkCount: $('#bulkCount'), bulkTopic: $('#bulkTopic'), bulkDelete: $('#bulkDelete'), bulkCancel: $('#bulkCancel'),
+  bulkBar: $('#bulkBar'), bulkCount: $('#bulkCount'), bulkSelectAll: $('#bulkSelectAll'), bulkTopic: $('#bulkTopic'), bulkDelete: $('#bulkDelete'), bulkCancel: $('#bulkCancel'),
   dlg: $('#topicsDlg'), dlgList: $('#dlgList'), topicForm: $('#topicForm'),
   settingsDlg: $('#settingsDlg'), btnSettings: $('#btnSettings'), btnExport: $('#btnExport'), btnImport: $('#btnImport'), importFile: $('#importFile'),
   badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
@@ -359,7 +360,7 @@ let toastTimer;
 function toast(msg, action) {
   if (!msg) return;
   const btn = action ? `<button type="button" id="toastAction" style="color:var(--bg);font-weight:700;text-decoration:underline;background:none;border:none;padding:0;margin-inline-start:.85rem;cursor:pointer;font:inherit">${esc(action.label)}</button>` : '';
-  el.toast.innerHTML = `<div class="rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg flex items-center" style="background:var(--ink);color:var(--bg)">${esc(msg)}${btn}</div>`;
+  el.toast.innerHTML = `<div class="pointer-events-auto rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg flex items-center" style="background:var(--ink);color:var(--bg)">${esc(msg)}${btn}</div>`;
   if (action) $('#toastAction').addEventListener('click', () => { clearTimeout(toastTimer); el.toast.innerHTML = ''; action.onClick(); });
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.toast.innerHTML = ''), action ? 6500 : 3800);
@@ -711,6 +712,17 @@ function sortLinks(list) {
   return arr; // 'new' – links already arrive newest-first from the store
 }
 
+function filteredLinks() {
+  let shown = topicScopedLinks();
+  const q = searchText.trim().toLowerCase();
+  if (q) shown = shown.filter((l) => [l.title, l.description, l.url, l.topic, ...(l.tags || [])].some((v) => (v || '').toLowerCase().includes(q)));
+  if (activePlatform) shown = shown.filter((l) => platformOf(l.url).name === activePlatform);
+  if (favOnly) shown = shown.filter((l) => l.fav);
+  if (doneOnly) shown = shown.filter((l) => l.done);
+  if (activeTags.size) shown = shown.filter((l) => (l.tags || []).some((t) => activeTags.has(t)));
+  return sortLinks(shown);
+}
+
 function renderGrid() {
   el.grid.classList.toggle('list-view', viewMode === 'list');
   if (!loaded) {
@@ -719,20 +731,14 @@ function renderGrid() {
       `<div class="card"><div class="thumb skel" style="border-radius:0"></div><div class="space-y-2 p-4"><div class="skel h-4 w-3/4"></div><div class="skel h-3 w-full"></div></div></div>`).join('');
     return;
   }
-  let shown = topicScopedLinks();
-  const q = searchText.trim().toLowerCase();
-  if (q) shown = shown.filter((l) => [l.title, l.description, l.url, l.topic, ...(l.tags || [])].some((v) => (v || '').toLowerCase().includes(q)));
-  if (activePlatform) shown = shown.filter((l) => platformOf(l.url).name === activePlatform);
-  if (favOnly) shown = shown.filter((l) => l.fav);
-  if (doneOnly) shown = shown.filter((l) => l.done);
-  if (activeTags.size) shown = shown.filter((l) => (l.tags || []).some((t) => activeTags.has(t)));
-  shown = sortLinks(shown);
+  const shown = filteredLinks();
 
   el.grid.innerHTML = shown.map(cardHTML).join('');
   el.empty.classList.toggle('hidden', shown.length > 0);
   el.empty.textContent = links.length === 0
     ? 'עוד אין קישורים. הדבק קישור בשדה למעלה כדי לשמור את הראשון.'
     : 'לא נמצאו קישורים שמתאימים לסינון.';
+  if (selectMode) paintBulkBar();   // the visible set just changed (filter/topic/search) – "בחר הכל" label may need to flip
 }
 
 function renderPreview() {
@@ -860,8 +866,7 @@ function saveCardDetails(id) {
 
 function toggleSelect(id) {
   selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
-  renderGrid();
-  paintBulkBar();
+  renderGrid();   // (this also repaints the bulk bar, since selectMode is on)
 }
 
 el.grid.addEventListener('click', (e) => {
@@ -1177,6 +1182,10 @@ function paintBulkBar() {
   el.bulkBar.classList.toggle('hidden', !selectMode);
   if (!selectMode) return;
   el.bulkCount.textContent = selectedIds.size ? `${selectedIds.size} נבחרו` : 'בחר קישורים לפעולה';
+  const visible = filteredLinks().map((l) => l.id);
+  const allSelected = visible.length > 0 && visible.every((id) => selectedIds.has(id));
+  el.bulkSelectAll.textContent = allSelected ? 'בטל הכל' : 'בחר הכל';
+  el.bulkSelectAll.disabled = visible.length === 0;
   el.bulkTopic.innerHTML = `<option value="" selected disabled>העבר לנושא…</option>`
     + allTopics().map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')
     + `<option value="${NONE}">${NONE_LABEL}</option>`;
@@ -1194,6 +1203,15 @@ function setSelectMode(on) {
 el.btnSelect.addEventListener('click', () => setSelectMode(!selectMode));
 el.bulkCancel.addEventListener('click', () => setSelectMode(false));
 
+el.bulkSelectAll.addEventListener('click', () => {
+  // selects/deselects only what the CURRENT filters show — switch topic tab first to "select all in a topic",
+  // or combine with search/platform/tag filters to select any other specific slice.
+  const visible = filteredLinks().map((l) => l.id);
+  const allSelected = visible.length > 0 && visible.every((id) => selectedIds.has(id));
+  visible.forEach((id) => (allSelected ? selectedIds.delete(id) : selectedIds.add(id)));
+  renderGrid();
+});
+
 el.bulkTopic.addEventListener('change', () => {
   const v = el.bulkTopic.value;
   if (!v || !selectedIds.size) return;
@@ -1209,6 +1227,7 @@ el.bulkTopic.addEventListener('change', () => {
 el.bulkDelete.addEventListener('click', () => {
   if (!selectedIds.size) return;
   const ids = [...selectedIds];
+  if (!confirm(`למחוק ${ids.length} קישורים?`)) return;
   const removed = links.filter((l) => ids.includes(l.id));   // snapshot the full link data, for undo
   setSelectMode(false);
   safe(async () => {
