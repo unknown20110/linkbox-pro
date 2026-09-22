@@ -56,6 +56,8 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
+  /* subtle edge fade = a visual hint that these rows scroll sideways (mouse wheel now works on them too) */
+  .no-scrollbar { -webkit-mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to right, transparent, #000 20px, #000 calc(100% - 20px), transparent); }
 
   .field { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
            padding: .6rem .8rem; color: var(--ink); font: inherit; }
@@ -95,7 +97,18 @@
   .trow .icon-btn { width: 1.9rem; height: 1.9rem; }
   .icon-btn[data-tact="share"][aria-pressed="true"] { color: var(--accent); }
   .icon-btn[data-act="done"][aria-pressed="true"] { color: #16a34a; }
+  .icon-btn[data-view][aria-pressed="true"] { background: var(--soft); color: var(--ink); }
   .btn-sm { padding: .35rem .75rem; font-size: .8rem; border-radius: 10px; }
+
+  /* list view: the grid becomes a vertical stack, and each card's thumb shrinks to sit beside the title
+     instead of on top of it. Nothing else about a card changes, so every action still works exactly the same. */
+  #grid.list-view { display: flex; flex-direction: column; gap: .5rem; }
+  #grid.list-view .card > a { display: flex; align-items: center; gap: .75rem; }
+  #grid.list-view .thumb { width: 4rem; height: 4rem; aspect-ratio: 1; flex: none; border-radius: 10px; }
+  #grid.list-view .thumb .badge { display: none; }
+  #grid.list-view .card > a > div.px-4.pt-3 { padding: 0; }
+  #grid.list-view .card > a p.line-clamp-2 { display: none; }
+  #grid.list-view .card h3 { -webkit-line-clamp: 1; font-size: .9rem; }
 
   .tagchip { font-size: .72rem; padding: .15rem .55rem; border-radius: 999px; background: var(--soft); color: var(--mute);
              border: 1px solid transparent; cursor: pointer; font-family: inherit; }
@@ -164,8 +177,12 @@
 
     <section id="previewPanel" class="mt-4 hidden" aria-live="polite"></section>
 
-    <div class="mt-8 space-y-3">
-      <input id="search" class="field" type="search" placeholder="חפש בכותרות, בתיאורים ובכתובות" aria-label="חיפוש">
+    <div id="scrollGroup" class="mt-8 space-y-3">
+      <div class="flex gap-2">
+        <input id="search" class="field flex-1" type="search" placeholder="חפש בכותרות, בתיאורים ובכתובות" aria-label="חיפוש">
+        <button type="button" id="viewGrid" class="icon-btn" data-view="grid" aria-label="תצוגת רשת"></button>
+        <button type="button" id="viewList" class="icon-btn" data-view="list" aria-label="תצוגת רשימה"></button>
+      </div>
       <nav id="tabs" class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1" aria-label="נושאים"></nav>
       <div id="filterBar" class="space-y-2"></div>
     </div>
@@ -287,12 +304,16 @@ const ICON = {
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
   checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.3l2.5 2.5 5-5.2"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>',
 };
 
 const el = {
   login: $('#login'), app: $('#app'), grid: $('#grid'), tabs: $('#tabs'), empty: $('#empty'),
   form: $('#addForm'), url: $('#urlInput'), btnAdd: $('#btnAdd'), panel: $('#previewPanel'),
-  search: $('#search'), filterBar: $('#filterBar'), dlg: $('#topicsDlg'), dlgList: $('#dlgList'), topicForm: $('#topicForm'),
+  search: $('#search'), filterBar: $('#filterBar'), scrollGroup: $('#scrollGroup'),
+  viewGrid: $('#viewGrid'), viewList: $('#viewList'),
+  dlg: $('#topicsDlg'), dlgList: $('#dlgList'), topicForm: $('#topicForm'),
   badge: $('#modeBadge'), btnUser: $('#btnUser'), btnTheme: $('#btnTheme'), toast: $('#toast'),
 };
 
@@ -327,6 +348,8 @@ let favOnly = false;
 let doneOnly = false;
 let activeTags = new Set();
 let sortMode = 'new';      // 'new' | 'old' | 'az'
+let viewMode = 'grid';     // 'grid' | 'list' – a device preference, kept in localStorage regardless of account type
+try { viewMode = localStorage.getItem('linkbox:view') === 'list' ? 'list' : 'grid'; } catch {}
 let editingId = null;      // id of the card whose note/tags are being edited inline
 
 // sharing (cloud accounts only)
@@ -643,6 +666,7 @@ function sortLinks(list) {
 }
 
 function renderGrid() {
+  el.grid.classList.toggle('list-view', viewMode === 'list');
   if (!loaded) {
     el.empty.classList.add('hidden');
     el.grid.innerHTML = Array.from({ length: 3 }, () =>
@@ -1060,6 +1084,32 @@ el.dlg.addEventListener('click', (e) => {
 });
 
 el.search.addEventListener('input', () => { searchText = el.search.value; renderGrid(); });
+
+/* View mode (grid/list) */
+function paintViewToggle() {
+  el.viewGrid.innerHTML = ICON.grid; el.viewGrid.setAttribute('aria-pressed', String(viewMode === 'grid'));
+  el.viewList.innerHTML = ICON.list; el.viewList.setAttribute('aria-pressed', String(viewMode === 'list'));
+}
+function setViewMode(m) {
+  if (m === viewMode) return;
+  viewMode = m;
+  try { localStorage.setItem('linkbox:view', m); } catch {}
+  paintViewToggle();
+  renderGrid();
+}
+el.viewGrid.addEventListener('click', () => setViewMode('grid'));
+el.viewList.addEventListener('click', () => setViewMode('list'));
+paintViewToggle();
+
+/* Desktop mouse-wheel support for the horizontally-scrolling rows (topics, platforms, tags) –
+   touch/trackpad swipe already works everywhere; this adds plain-mouse-wheel support too. */
+el.scrollGroup.addEventListener('wheel', (e) => {
+  const row = e.target.closest('.no-scrollbar');
+  if (!row || row.scrollWidth <= row.clientWidth) return;
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // a trackpad's own horizontal swipe is left alone
+  row.scrollLeft += e.deltaY;
+  e.preventDefault();
+}, { passive: false });
 
 /* Theme */
 function paintTheme() {
